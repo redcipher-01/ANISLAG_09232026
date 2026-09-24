@@ -27,7 +27,11 @@ jobs:
         run: docker build -f FileProcessing.Api/Dockerfile -t fileprocessing-api:ci .
 
       - name: Start container
-        run: docker run -d --name fileprocessing-api -p 8080:8080 fileprocessing-api:ci
+        run: |
+          test_key="$(openssl rand -hex 32)"
+          docker run -d --name fileprocessing-api -p 8080:8080 \
+            -e "ApiKey=$test_key" \
+            fileprocessing-api:ci
 
       - name: Check health endpoint
         run: |
