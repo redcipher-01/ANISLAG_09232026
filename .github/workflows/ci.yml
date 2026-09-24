@@ -1,0 +1,42 @@
+name: Build and test
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Run tests
+        run: dotnet test FileProcessing.Tests/FileProcessing.Tests.csproj --configuration Release
+
+      - name: Build container image
+        run: docker build -f FileProcessing.Api/Dockerfile -t fileprocessing-api:ci .
+
+      - name: Start container
+        run: docker run -d --name fileprocessing-api -p 8080:8080 fileprocessing-api:ci
+
+      - name: Check health endpoint
+        run: curl --fail --retry 10 --retry-delay 2 --retry-connrefused http://localhost:8080/health
+
+      - name: Check API key protection
+        run: |
+          status=$(curl --silent --output /dev/null --write-out '%{http_code}' http://localhost:8080/api/files/report)
+          test "$status" = "401"
+
+      - name: Show container logs on failure
+        if: failure()
+        run: docker logs fileprocessing-api
