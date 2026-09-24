@@ -24,6 +24,7 @@ public static class FileEndpoints
         HttpRequest request,
         JsonTransactionProcessor processor,
         ITrackingService trackingService,
+        ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
     {
         if (file.Length is 0 or > 1_048_576 || !string.Equals(Path.GetExtension(file.FileName), ".json", StringComparison.OrdinalIgnoreCase))
@@ -57,12 +58,23 @@ public static class FileEndpoints
 
             stopwatch.Stop();
 
+            string fileName = Path.GetFileName(file.FileName);
+
             trackingService.Record(new ProcessedFile(
-                Path.GetFileName(file.FileName),
+                fileName,
                 DateTimeOffset.UtcNow,
                 stopwatch.ElapsedMilliseconds,
                 result.InputCount,
                 result.OutputCount));
+
+            ILogger logger = loggerFactory.CreateLogger("FileProcessing.Api.Endpoints.FileEndpoints");
+
+            logger.LogInformation(
+                "Processed file {FileName}: {InputCount} input items, {OutputCount} output items in {ProcessingTimeMilliseconds} ms",
+                fileName,
+                result.InputCount,
+                result.OutputCount,
+                stopwatch.ElapsedMilliseconds);
 
             return Results.Ok(result);
         }
