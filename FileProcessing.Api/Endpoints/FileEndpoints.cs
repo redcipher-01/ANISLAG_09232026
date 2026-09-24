@@ -1,5 +1,7 @@
-﻿using FileProcessing.Application.Models;
+﻿using FileProcessing.Application.Interfaces;
+using FileProcessing.Application.Models;
 using FileProcessing.Application.Processing;
+using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
 
@@ -12,6 +14,8 @@ public static class FileEndpoints
         app.MapPost("/api/files/process", ProcessFileAsync)
             .DisableAntiforgery();
 
+        app.MapGet("/api/files/report", GetReport);
+
         return app;
     }
 
@@ -19,6 +23,7 @@ public static class FileEndpoints
         IFormFile file,
         HttpRequest request,
         JsonTransactionProcessor processor,
+        ITrackingService trackingService,
         CancellationToken cancellationToken)
     {
         if (file.Length is 0 or > 1_048_576 || !string.Equals(Path.GetExtension(file.FileName), ".json", StringComparison.OrdinalIgnoreCase))
@@ -32,8 +37,8 @@ public static class FileEndpoints
         decimal minimumAmount = 0m;
         string minimumInput = request.Query["minimumAmount"].ToString();
 
-        if (!string.IsNullOrEmpty(minimumInput) 
-            && (!decimal.TryParse(minimumInput, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out minimumAmount) 
+        if (!string.IsNullOrEmpty(minimumInput)
+            && (!decimal.TryParse(minimumInput, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out minimumAmount)
             || minimumAmount < 0))
         {
             return Results.BadRequest(new
@@ -42,11 +47,22 @@ public static class FileEndpoints
             });
         }
 
+        Stopwatch stopwatch = Stopwatch.StartNew();
+
         try
         {
             await using var stream = file.OpenReadStream();
 
             ProcessingResult result = await processor.ProcessAsync(stream, minimumAmount, cancellationToken);
+
+            stopwatch.Stop();
+
+            trackingService.Record(new ProcessedFile(
+                Path.GetFileName(file.FileName),
+                DateTimeOffset.UtcNow,
+                stopwatch.ElapsedMilliseconds,
+                result.InputCount,
+                result.OutputCount));
 
             return Results.Ok(result);
         }
@@ -58,5 +74,14 @@ public static class FileEndpoints
         {
             return Results.BadRequest(new { error = exception.Message });
         }
+    }
+
+    private static IResult GetReport(ITrackingService trackingService)
+    {
+        return Results.Ok(new
+        {
+            totalProcessed = trackingService.TotalProcessed,
+            recentFiles = trackingService.GetRecent()
+        });
     }
 }
